@@ -6,7 +6,7 @@ of crustal velocity profiles from the GSN database.
 ## Citing
 
 ```
-...
+Artemieva, I.M. and Mooney, W.D., Thermal thickness and evolution of Precambrian lithosphere: A global study, J. Geophys. Res., 106, 16,387 - 166, 414, 2001. 
 ```
 
 ## Installation
