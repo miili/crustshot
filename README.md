@@ -1,11 +1,17 @@
 # Crustshot
 
 This script provides functions for spatial selection, querying and processing
-of crustal velocity profiles from the GSN database
+of crustal velocity profiles from the GSN database.
+
+## Citing
+
+```
+...
+```
 
 ## Installation
 
-Installation for different platforms
+Installation for different platforms:
 
 ### Linux
 
@@ -28,6 +34,10 @@ cd crustshot
 conda install .
 ```
 
+### Installing Matplotlib.Basemap
+
+The mapping features rely on `mpl_toolkit.basemap`. Please follow http://matplotlib.org/basemap/users/installing.html for installation hints
+
 ## Examples
 
 Simplest example:
@@ -39,4 +49,4 @@ db = CrustDB()
 db.plotHistogram()
 ```
 
-for more see directory `examples/`
+for more see file in `examples/`
