@@ -439,39 +439,36 @@ PROVINCE_KEY = {
 }
 
 
-def _provinceKey(province):
+def provinceKey(province):
     for key, value in PROVINCE_KEY.iteritems():
         if province.strip().lower() == key.lower():
             return value
-    return 'Unknown'
+    return 'Undefined'
 
 
-def _ageKey(age):
+def ageKey(age):
     for key, value in AGE_KEY.iteritems():
         if age.strip().lower() == key.lower():
             return value
-    return 'Unknown'
+    return 'Undefined'
 
 
-def _referenceKey(ref):
+def referenceKey(ref):
+    if int(ref[:2]) > 50:
+        y_prefix = '19'
+    else:
+        y_prefix = '20'
+    return 'Year %s%s - %s. Author %s.' % (
+        y_prefix, ref[:2], ref[4], ref[2])
+
+
+def pubYear(ref):
     try:
         if int(ref[:2]) > 50:
             y_prefix = '19'
         else:
             y_prefix = '20'
-        return 'Year %s%s - %s. Author %s.' % (y_prefix, ref[:2], ref[4], ref[2])
-    except:
-        return ''
-
-
-def _pubYear(ref):
-    try:
-        if int(ref[:2]) > 50:
-            y_prefix = '19'
-        else:
-            y_prefix = '20'
-
         year = '%s%s' % (y_prefix, ref[:2])
         return int(year)
-    except:
-        return 0
+    except ValueError:
+        return -9999
