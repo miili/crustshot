@@ -1,115 +1,98 @@
 #!/bin/python
-import numpy as np
+import numpy as num
 import matplotlib.pyplot as plt
 import copy
 from os import path
 from .abbreviations import _ageKey, _provinceKey, _referenceKey, _pubYear
 
-
 THICKNESS_HALFSPACE = 2
 
 
-class velocityProfile:
+class VelocityProfile:
     '''
-    2013-01-28 Marius Isken, US Geological Survey, Menlo Park, CA
+    Single velocity profile representation from the Global Crustal Database
 
-    class crustshot is ment to handle a single velocity profile from the GSN seismic velocity database.
-    and offers depth continuous querying of velocity as well as plotting a stepped V-z plot.
+    https://earthquake.usgs.gov/data/crust/
+
+    .. note ::
+
+        Citation
+
+        W.D. Mooney, G. Laske and G. Masters, CRUST 5.1: A global crustal model
+        at 5°x5°. J. Geophys. Res., 103, 727-747, 1998.
     '''
+    def __init__(self, lat, lon, Vp, Vs, d, h=None, **kwargs):
+        '''Initialize the velocity profile
 
-#    def __init__(self, Vp, Vs, h, d, lat=90, lon=90, uid=None, geog_region=None, reference=None):
-    def __init__(self, Vp, Vs, d, h=None, **kwargs):
-
+        :param lat: profiles latitude
+        :type lat: float
+        :param lon: profile longitude
+        :type lon: float
+        :param elevation: optional
+        :type elevation: float
+        :param Vp: P wave velocity as float list in km/s, if n/a .00
+        :type Vp: :class:`numpy.array`
+        :param Vs: P wave velocity as float list in km/s
+        :type Vs: :class:`numpy.array`
+        :param h: layer thickness
+        :type h: :class:`numpy.array`
+        :param geol_loc:
+        :type geol_loc:
+        :param geol_province: Geological province, abbreviation from
+        :type geol_province: str
+        :param geol_age: Geological age of the formation location
+            as eon/epoch name
+        :type geol_age: str
+        :param method: Measurering method of the profile
+        :type method: str
+        :param heatflow: Heatflow measurement if available in [mW/m^2]
+        :type heatflow: float
+        :type reference: Reference/Citation for for profile
+        :type reference: str
+        :param uid: unique id from GSN list, default ``0``
+        :type uid: int
         '''
-        __init__ stores input params as numpy.arrays and defines the stepped velocity function
-        if there's no velocity information it will be set to numpy.nan
 
-        :param Vp: p-wave velocity as float list in km/s, if n/a .00, type list or numpy.array
-        :param Vp: p-wave velocity as float list in km/s, type list or numpy.array
-        :param h: layer thickness, type list or numpy.array
-        :param lat: profiles latitude, type float
-        :param lon: profile longitude, type float
-        :param uid: unique id from GSN list, type int
-        '''
-        # Init internal variables
-        self.vp = np.array(Vp)
-        self.vs = np.array(Vs)
-        # Layer depth
-        self.d = np.array(d)
-        # Layer thickness
-        if h is not None:
-            self.h = np.array(h)
-        else:
-            self.h = np.abs(self.d - np.roll(self.d, -1))
-            self.h[-1] = 0
-        # Number of layers
-        self.layers = len(self.vp) - 1 # Halfspace is not a layer
+        self.lat = lat
+        self.lon = lon
+        self.vp = num.array(Vp)
+        self.vs = num.array(Vs)
+        self.d = num.array(d)
 
-        # Profile coordinates
-        self.lat = kwargs.get('lat', 90)
-        self.lon = kwargs.get('lon', 90)
+        self.h = num.abs(self.d - num.roll(self.d, -1))
+        self.h[-1] = 0
 
-        # Geological Location
+        self.nlayers = self.vp.size - 1
+
         self.geog_loc = kwargs.get('geog_loc', None)
-        # Geological Province
         self.geol_province = kwargs.get('geol_province', None)
-        # Geological Age
         self.geol_age = kwargs.get('age', None)
-        # Geological Age
-        self.elevation = kwargs.get('elevation', np.nan)
-        # Seismic Method
+        self.elevation = kwargs.get('elevation', num.nan)
         self.method = kwargs.get('method', None)
-        # Heatflow Method
-        self.heatflow = kwargs.get('heatflow', np.nan)
-        if self.heatflow == 0: self.heatflow = np.nan
-        # Reference
+        self.heatflow = kwargs.get('heatflow', num.nan)
+        if self.heatflow == 0:
+            self.heatflow = num.nan
         self.reference = kwargs.get('reference', None)
-        # Yeor of publication
         self.pub_year = _pubYear(self.reference)
-        # Unique id
-        self.uid = np.int(kwargs.get('uid', 0))
+        self.uid = num.int(kwargs.get('uid', 0))
+
+        self.vs[self.vs == 0] = num.nan
+        self.vp[self.vp == 0] = num.nan
+
+        self._step_depth = num.repeat(self.d, 2)
+        self._step_depth[0] = 0
+        self._step_depth[-1] += THICKNESS_HALFSPACE
+
+        self._step_vp = num.repeat(self.vp, 2)
+        self._step_vs = num.repeat(self.vs, 2)
 
         self._cont_vp = None
         self._cont_hash = None
 
-        # Stepped depth and velocity vectors (for plotting)
-        self._step_depth = np.zeros(self.d.size*2)
-        for i in range(self.d.size):
-            self._step_depth[2*i] = self.d[i]
-            if not i == self.d.size-1:
-                self._step_depth[2*i+1] = self.d[i+1]
-            else:
-                self._step_depth[2*i+1] = self.d[i] + THICKNESS_HALFSPACE # Add halfspace
-
-        self._step_vp = self.__velocsteps(self.vp)
-        self._step_vs = self.__velocsteps(self.vs)
-
-        
-        self._step_vs[self._step_vs==0] = np.nan
-        self._step_vp[self._step_vp==0] = np.nan
-
-        self.vs[self.vs==0] = np.nan
-        self.vp[self.vp==0] = np.nan
-        #self.h[self.h==0] = np.nan
-
-    def __velocsteps(self, v):
-        '''
-        private function __velocsteps returns a stepped velocity array for :param v:
-        used for plotting velocities
-
-        :param v: velocity list, type numpy.array
-        :return: stepped velocities, type numpy.array
-        '''
-        vstep = np.empty(v.size*2)
-        for i in range(v.size):
-            vstep[2*i] = v[i]
-            vstep[2*i+1] = v[i]
-        return vstep
-
     def continuousProfile(self, depths):
         '''
-        function veloc_at_depth returns a continuous velocity function over depth
-        Mind global variable THICKNESS_HALFSPACE
+        function veloc_at_depth returns a continuous velocity function over
+        depth, mind ``THICKNESS_HALFSPACE``
 
         :param depth: numpy.array vector of depths
         :param phase: wave phase, P or S, type string
@@ -119,19 +102,17 @@ class velocityProfile:
         :return: array of depth corresponding velocities, type numpy.array
         '''
         # Caching purpose
-        if self._cont_vp is not None\
-        and self._cont_hash == depths.sum():
+        if self._cont_vp is not None and self._cont_hash == depths.sum():
             return self._cont_vp
 
         velocity = self.vp
 
-        cont_v = np.empty(len(depths))
-        cont_v[:] = np.nan
+        cont_v = num.empty(len(depths))
+        cont_v[:] = num.nan
         _last_i = 0
         for _ti, this_depth in enumerate(depths):
             for _i in xrange(_last_i, self.d.size-1):
-                if this_depth >= self.d[_i]\
-                and this_depth < self.d[_i+1]:
+                if this_depth >= self.d[_i] and this_depth < self.d[_i+1]:
                     cont_v[_ti] = velocity[_i]
                     break
                 elif this_depth >= self.d[-1]\
@@ -145,9 +126,7 @@ class velocityProfile:
         return cont_v
 
     def plot(self, figure=None, plt_vs=False):
-        '''
-        function plot shows the velocity - depth function through matplotlib
-        '''
+        ''' Plot velocity - depth function through matplotlib '''
         if not isinstance(figure, plt.Figure):
             fig, ax = plt.subplots()
         else:
@@ -155,7 +134,7 @@ class velocityProfile:
             ax = fig.gca()
 
         ax.plot(self._step_vp, -self._step_depth, color='k', linestyle= '-', linewidth=1.2)
-        if np.any(self.vs) and plt_vs:
+        if num.any(self.vs) and plt_vs:
             ax.plot(self._step_vs, -self._step_depth, color='k', linestyle='--', linewidth=1.2)
 
         if figure is None:
@@ -170,11 +149,6 @@ class velocityProfile:
             fig.show()
 
     def __str__(self, csv=False):
-        '''
-        built-in function __str__ returns a string to use for print
-
-        :return: multiline string containing all velocity, thickness and geographical information, type string
-        '''
         if not csv:
             output = '{:<24} {:05d}\n'.format('Profile UID:', self.uid)
             try:
@@ -216,9 +190,6 @@ class CrustDB(object):
     and provides functions for spatial selection, querying and processing of the data.
     '''
     def __init__(self, database_file=None):
-        '''
-        built-in function __init__
-        '''
         self.profiles = []
 
         '''
@@ -234,74 +205,40 @@ class CrustDB(object):
                        'data/gsc20130501.txt'))
 
     def __len__(self):
-        '''
-        built-in function __len__
-
-        :return: number of profiles, type int
-        '''
         return len(self.profiles)
 
     def __setitem__(self, key, value):
-        '''
-        built-in function __setitem__
-            ? instead of False an exception might has to be triggered
-
-        :param key: array key, type int
-        :param value: new value, type velocityProfile()
-        '''
-        if not value.__class__.__name__ == 'velocityProfile':
-            raise TypeError
+        if not isinstance(value, VelocityProfile):
+            raise TypeError('Element is not a VelocityProfile')
         self.profiles[key] = value
 
     def __delitem__(self, key):
-        '''
-        built-in function __ del__
-
-        :param key: array key, type int
-        '''
         self.profiles.remove(key)
 
     def __getitem__(self, key):
-        '''
-        built-in function __getitem__
-
-        :param key: array key, type int
-        '''
         return self.profiles[key]
 
     def __str__(self):
-        '''
-        built-in function __str__ to use for print
-
-        :return: multiline string stats about the container, type string
-        '''
-        output = "Container contains " + str(len(self.profiles)) + " velocity profiles:\n\n"
-        output += "uid\tlat\tlon\tmax depth\n"
+        rstr = "Container contains " + str(len(self.profiles)) + " velocity profiles:\n\n"
+        rstr += "uid\tlat\tlon\tmax depth\n"
         #for profile in self.profiles:
-        #    output += str(profile.uid) + '\t'+ str(profile.lat) + '\t'+ str(profile.lon) + '\t'+ str(max(profile.depth)) + '\n'
-        return output
+        #    rstr += str(profile.uid) + '\t'+ str(profile.lat) + '\t'+ str(profile.lon) + '\t'+ str(max(profile.depth)) + '\n'
+        return rstr
 
     def append(self, value):
-        '''
-        function append handles appending profiles.
-            ? instead of False an exception might has to be triggered
-
-        :param value: valocity profile to append to self.profiles, type velocityProfile()
-        '''
-        if not value.__class__.__name__ == 'velocityProfile':
-            raise TypeError
+        if not isinstance(value, VelocityProfile):
+            raise TypeError('Element is not a VelocityProfile')
         self.profiles.append(value)
 
     def copy(self):
         return copy.deepcopy(self)
 
-    ## Container functions
     def lats(self):
-        return np.array(
+        return num.array(
             [self.profiles[i].lat for i in xrange(len(self.profiles))])
     
     def lons(self):
-        return np.array(
+        return num.array(
             [self.profiles[i].lon for i in xrange(len(self.profiles))])
 
     def dataMatrix(self):
@@ -312,17 +249,17 @@ class CrustDB(object):
         if self.data_matrix is not None:
             return self.data_matrix
 
-        cont_vp = np.concatenate(
+        cont_vp = num.concatenate(
             [profile.vp for profile in self.profiles])
-        cont_vs = np.concatenate(
+        cont_vs = num.concatenate(
             [profile.vs for profile in self.profiles])
-        cont_h = np.concatenate(
+        cont_h = num.concatenate(
             [profile.h for profile in self.profiles])
-        cont_d = np.concatenate(
+        cont_d = num.concatenate(
             [profile.d for profile in self.profiles])
 
-        self.data_matrix = np.core.records.fromarrays(
-            np.vstack([
+        self.data_matrix = num.core.records.fromarrays(
+            num.vstack([
                 cont_vp,
                 cont_vs,
                 cont_h,
@@ -337,15 +274,15 @@ class CrustDB(object):
         :param drange: Min/Max Tuple of depth range to examine
         :param dd: Stepping in depth
         '''
-        sdepth = np.linspace(drange[0], drange[1], (drange[1]-drange[0])/dd)
+        sdepth = num.linspace(drange[0], drange[1], (drange[1]-drange[0])/dd)
         ndepth = len(sdepth)
 
-        v_mat = np.empty((len(self.profiles), ndepth))
+        v_mat = num.empty((len(self.profiles), ndepth))
         # Arrange data in 2-D array
         for _i, profile in enumerate(self.profiles):
             v_mat[_i, :] = profile.continuousProfile(sdepth)
 
-        return sdepth, np.ma.masked_invalid(v_mat)
+        return sdepth, num.ma.masked_invalid(v_mat)
 
     def rmsRank(self, corr_profile, drange=(0, 35), dd=.1):
         '''
@@ -363,16 +300,16 @@ class CrustDB(object):
         v_corr = corr_profile.continuousProfile(sdepth)
 
         #filling nans with max Vp
-        nan_ind = np.where(np.isnan(v_corr))[0]
+        nan_ind = num.where(num.isnan(v_corr))[0]
         v_corr[nan_ind] = v_corr.max()
 
-        rms = np.empty(len(self.profiles))
+        rms = num.empty(len(self.profiles))
         for _p in xrange(len(self.profiles)):
             _corr_profile = p_matrix[_p,:]
-            nan_ind = np.where(np.isnan(_corr_profile))[0]
+            nan_ind = num.where(num.isnan(_corr_profile))[0]
             _corr_profile[nan_ind] = _corr_profile.max()
 
-            rms[_p] = np.sqrt(((_corr_profile-v_corr)**2).sum()/len(v_corr))
+            rms[_p] = num.sqrt(((_corr_profile-v_corr)**2).sum()/len(v_corr))
 
         return rms
 
@@ -385,18 +322,18 @@ class CrustDB(object):
         :param drange: Min/Max Tuple of depth range to examine
         :param dd: Stepping in depth
 
-        :return: np.histogram2d
+        :return: num.histogram2d
         '''
         # Arrange data in 1-D array
         sdepth, v_vec = self.vMatrix(drange, dd)
         v_vec = v_vec.flatten()
-        d_vec = np.tile(sdepth, len(self.profiles))
+        d_vec = num.tile(sdepth, len(self.profiles))
 
         # Velocity and depth bins
         vbins = (vrange[1]-vrange[0]) / vbin
         dbins = int((drange[1]-drange[0]) // dbin)
 
-        return np.histogram2d(v_vec, d_vec,
+        return num.histogram2d(v_vec, d_vec,
                             range=(vrange, drange),
                             bins=(vbins, dbins),
                             normed=False)
@@ -414,8 +351,8 @@ class CrustDB(object):
         :return v_std: std for each velocity
         '''
         sdepth, v_mat = self.vMatrix(drange, dd)
-        v_mean = np.ma.mean(v_mat, axis=0)
-        v_std = np.ma.std(v_mat, axis=0)
+        v_mean = num.ma.mean(v_mat, axis=0)
+        v_std = num.ma.std(v_mat, axis=0)
 
         return sdepth, v_mean.flatten(), v_std.flatten()
 
@@ -584,7 +521,7 @@ class CrustDB(object):
                     extent=grid_ext, aspect=aspect)
 
         if plt_cbar:
-            cticks = np.unique(np.arange(0, vfield.max(), vfield.max()//10).round())
+            cticks = num.unique(num.arange(0, vfield.max(), vfield.max()//10).round())
             cbar = fig.colorbar(histogram, cax=cbax, ax=None, ticks=cticks, format='%1i')
             if percent:
                 cbar.set_label('Percent')
@@ -592,8 +529,8 @@ class CrustDB(object):
                 cbar.set_label('Number of Profiles')
 
         # Plot Mode and Mean if wished
-        data_depth = np.linspace(drange[0], drange[1], dbins)
-        data_mode = np.empty(len(data_depth))
+        data_depth = num.linspace(drange[0], drange[1], dbins)
+        data_mode = num.empty(len(data_depth))
         for _i in xrange(dbins):
             data_mode[_i] = vrange[0] + vfield[:, _i].argmax()*vbin_size
         data_mode += vbin_size/2
@@ -602,8 +539,8 @@ class CrustDB(object):
             ax.plot(data_mode[data_depth<plt_max], data_depth[data_depth<plt_max], alpha=.8, color='w', label='Mode')
 
         if plt_mean:
-            data_depth = np.linspace(drange[0], drange[1], dbins)
-            data_mean = np.zeros_like(data_depth)
+            data_depth = num.linspace(drange[0], drange[1], dbins)
+            data_mean = num.zeros_like(data_depth)
             for _d in xrange(dbins):
                 cum_v = sum(vfield[:, _d])
                 for _v in xrange(len(vfield[:, _d])):
@@ -617,8 +554,8 @@ class CrustDB(object):
             # ax.errorbar(std_mean[::_stp], std_depth[::_stp], xerr=data_std[::_stp], fmt=None, alpha=.5, ecolor='w')
 
         # Plot labels and stuff
-        ax.xaxis.set_ticks(np.arange(vrange[0], vrange[1], .5) + vbin_size/2)
-        ax.xaxis.set_ticklabels(np.arange(vrange[0], vrange[1], .5))
+        ax.xaxis.set_ticks(num.arange(vrange[0], vrange[1], .5) + vbin_size/2)
+        ax.xaxis.set_ticklabels(num.arange(vrange[0], vrange[1], .5))
         ax.grid(True, which="both", color="w", linewidth=.8, alpha=.4)
 
         ax.text(.025, .025, '%d Profiles' % len(self.profiles), color='w', alpha=.7,
@@ -643,7 +580,7 @@ class CrustDB(object):
             plt.show()
 
         if return_mode:
-            v_profile, v_index = np.unique(data_mode, return_index=True)
+            v_profile, v_index = num.unique(data_mode, return_index=True)
             return data_depth[v_index], v_profile-vbin_size/2
 
     def plotVelocitySurf(self, v_max, d_min=0, d_max=60, figure=None):
@@ -719,8 +656,8 @@ class CrustDB(object):
 
         lats = self.lats()
         lons = self.lons()
-        frame_lon = np.abs(lons.max()-lons.min())*.075
-        frame_lat = np.abs(lats.max()-lats.min())*.075
+        frame_lon = num.abs(lons.max()-lons.min())*.075
+        frame_lat = num.abs(lats.max()-lats.min())*.075
 
         corners = dict()
         corners['llcrnrlon'] = lons.min()-frame_lon
@@ -749,8 +686,8 @@ class CrustDB(object):
         map.drawcoastlines()
         map.drawcountries()
         map.drawstates()
-        map.drawmeridians(np.arange(0,360,10), labels=[1,0,0,1], linewidth=.5)
-        map.drawparallels(np.arange(-90,90,10), labels=[0,1,0,1], linewidth=.5)
+        map.drawmeridians(num.arange(0,360,10), labels=[1,0,0,1], linewidth=.5)
+        map.drawparallels(num.arange(-90,90,10), labels=[0,1,0,1], linewidth=.5)
         if figure is None:
             return plt.show()
 
@@ -764,10 +701,10 @@ class CrustDB(object):
         :param d_min: minimum depth, type int
         :param phase: phase to query for, type string NOT YET IMPLEMENTED!!!
 
-        :return: list of lat, lon, depth and uid when v_max is exceeded, type list(np.array)
+        :return: list of lat, lon, depth and uid when v_max is exceeded, type list(num.array)
         '''
-        self.profile_exceed_velocity = np.empty(len(self.profiles))
-        self.profile_exceed_velocity[:] = np.nan
+        self.profile_exceed_velocity = num.empty(len(self.profiles))
+        self.profile_exceed_velocity[:] = num.nan
 
         for _p, profile in enumerate(self.profiles):
             for _i in xrange(len(profile.d)):
@@ -851,7 +788,7 @@ class CrustDB(object):
         r_container = self._emptyCopy()
 
         for profile in self.profiles:
-            if np.sqrt((lat - profile.lat)**2 + (lon - profile.lon)**2) <= radius:
+            if num.sqrt((lat - profile.lat)**2 + (lon - profile.lon)**2) <= radius:
                 r_container.append(profile)
 
         return r_container
@@ -925,7 +862,7 @@ class CrustDB(object):
         r_container = self._emptyCopy()
 
         for profile in self.profiles:
-            if not np.all(np.isnan(profile.vp)):
+            if not num.all(num.isnan(profile.vp)):
                 r_container.append(profile)
         return r_container
 
@@ -933,7 +870,7 @@ class CrustDB(object):
         r_container = self._emptyCopy()
 
         for profile in self.profiles:
-            if not np.all(np.isnan(profile.vs)):
+            if not num.all(num.isnan(profile.vs)):
                 r_container.append(profile)
         return r_container
 
@@ -1016,11 +953,11 @@ class CrustDB(object):
         with open(database_file, 'r') as database:
             vp = []; vs = []; h = []; depth = [];
             profile_info = {
-                'uid': np.nan,
+                'uid': num.nan,
                 'geol_province': None,
                 'geog_loc': None,
-                'elevation': np.nan,
-                'heatflow': np.nan,
+                'elevation': num.nan,
+                'heatflow': num.nan,
                 'age': None,
                 'method': None,
                 'reference': None
@@ -1032,7 +969,7 @@ class CrustDB(object):
                     # this is a entry!
                     # create velocity profile and append to container
                     if not len(depth) == 0:
-                        self.append(velocityProfile(
+                        self.append(VelocityProfile(
                             Vp=vp, Vs=vs, h=h, d=depth,
                             lat=lat, lon=lon,
                             **profile_info))
@@ -1072,7 +1009,7 @@ class CrustDB(object):
 
                     readline += 1
             # Append last profile
-            self.append(velocityProfile(
+            self.append(VelocityProfile(
                 Vp=vp, Vs=vs, h=h, d=depth,
                 lat=lat, lon=lon,
                 **profile_info))
