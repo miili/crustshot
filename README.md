@@ -6,7 +6,7 @@ of crustal velocity profiles from the GSN database.
 ## Citing
 
 ```
-Artemieva, I.M. and Mooney, W.D., Thermal thickness and evolution of Precambrian lithosphere: A global study, J. Geophys. Res., 106, 16,387 - 166, 414, 2001. 
+ W.D. Mooney, G. Laske and G. Masters, CRUST 5.1: A global crustal model at 5°x5°. J. Geophys. Res., 103, 727-747, 1998.
 ```
 
 ## Installation
